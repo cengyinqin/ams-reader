@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { fetchIndex, fetchBook, IndexData } from '../hooks/useBook'
+import { fetchIndex, fetchBook, IndexData, VerseRef } from '../hooks/useBook'
 import { IconFolder, IconSearch, IconX, IconArrowLeft, IconArrowRight, IconArrowUp, IconArrowDown } from '../components/Icons'
 import { App } from '@capacitor/app'
 
@@ -35,7 +35,9 @@ export default function Search() {
   const [l3, setL3] = useState<L3State | null>(null)
 
   const [l3Paragraphs, setL3Paragraphs] = useState<string[]>([])
+  const [l3Verses, setL3Verses] = useState<VerseRef | undefined>(undefined)
   const [l3Loading, setL3Loading] = useState(false)
+  const [verseModal, setVerseModal] = useState<{ code: string; text: string } | null>(null)
 
   const [showPicker, setShowPicker] = useState(false)
   const [pickerBooks, setPickerBooks] = useState<PickerBook[]>([])
@@ -156,6 +158,7 @@ export default function Search() {
       if (reqId !== goL3ReqId.current) return
       const ch = book.chapters[chapterIdx]
       setL3Paragraphs(ch?.paragraphs || [])
+      setL3Verses(ch?.verses)
       setL3Loading(false)
     } catch {
       if (reqId === goL3ReqId.current) {
@@ -303,7 +306,7 @@ export default function Search() {
         )}
 
         {level === 'L3' && l3 && (
-          <TextLocator paragraphs={l3Paragraphs} keyword={q} loading={l3Loading} />
+          <TextLocator paragraphs={l3Paragraphs} verses={l3Verses} keyword={q} loading={l3Loading} onVerse={setVerseModal} />
         )}
       </div>
 
@@ -313,6 +316,18 @@ export default function Search() {
           onClose={() => setShowPicker(false)}
           onSelectBook={pickerSelectBook}
         />
+      )}
+
+      {verseModal && (
+        <div className="verse-overlay" onClick={() => setVerseModal(null)}>
+          <div className="verse-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="verse-header">
+              <span className="verse-code">{verseModal.code}</span>
+              <button className="verse-close" onClick={() => setVerseModal(null)}><IconX size={16} /></button>
+            </div>
+            <div className="verse-body">{verseModal.text}</div>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -333,19 +348,24 @@ function Snippet({ text, keyword }: { text: string; keyword: string }) {
   )
 }
 
-function TextLocator({ paragraphs, keyword, loading }: { paragraphs: string[]; keyword: string; loading: boolean }) {
+function TextLocator({ paragraphs, verses, keyword, loading, onVerse }: {
+  paragraphs: string[]; verses?: VerseRef; keyword: string; loading: boolean
+  onVerse?: (v: { code: string; text: string }) => void
+}) {
   const markRefs = useRef<(HTMLElement | null)[]>([])
   const currentRef = useRef(0)
   const [currentMatch, setCurrentMatch] = useState(0)
   const renderId = useRef(0)
 
+  const verseRe = /\[\[r:\d+\]\]/g
   const { matchCount } = useMemo(() => {
     if (!paragraphs.length || !keyword.trim()) return { matchCount: 0 }
     const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const regex = new RegExp(escaped, 'gi')
     let count = 0
     for (const line of paragraphs) {
-      const m = line.match(regex)
+      const clean = line.replace(verseRe, '')
+      const m = clean.match(regex)
       if (m) count += m.length
     }
     return { matchCount: count }
@@ -399,14 +419,18 @@ function TextLocator({ paragraphs, keyword, loading }: { paragraphs: string[]; k
       )}
 
       <div className="locator-content">
-        {matchCount === 0 && !keyword.trim() && paragraphs.map((p, i) => <p key={i} className="locator-p">{p}</p>)}
+        {matchCount === 0 && !keyword.trim() && paragraphs.map((p, i) => (
+          <VerseText key={i} text={p} verses={verses} onVerse={onVerse} />
+        ))}
         {matchCount === 0 && keyword.trim() && <div className="empty-state"><p>本章未找到「{keyword}」</p></div>}
         {matchCount > 0 && (
           <HighlightedText
             key={renderId.current}
             paragraphs={paragraphs}
             keyword={keyword}
+            verses={verses}
             markRefs={markRefs}
+            onVerse={onVerse}
           />
         )}
       </div>
@@ -428,39 +452,70 @@ function flash(el: HTMLElement) {
   setTimeout(() => { el.style.background = '' }, 1500)
 }
 
-function HighlightedText({ paragraphs, keyword, markRefs }: {
+const VERSE_MARKER = /\[\[r:(\d+)\]\]/g
+
+function HighlightedText({ paragraphs, keyword, verses, markRefs, onVerse }: {
   paragraphs: string[]; keyword: string;
+  verses?: VerseRef
   markRefs: React.MutableRefObject<(HTMLElement | null)[]>
+  onVerse?: (v: { code: string; text: string }) => void
 }) {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const regex = new RegExp(`(${escaped})`, 'gi')
   let matchIdx = 0
 
+  function renderFragment(text: string): (string | JSX.Element)[] {
+    const result: (string | JSX.Element)[] = []
+    VERSE_MARKER.lastIndex = 0
+    let last = 0
+    let m
+    while ((m = VERSE_MARKER.exec(text)) !== null) {
+      if (m.index > last) {
+        result.push(...highlightParts(text.slice(last, m.index)))
+      }
+      if (verses && verses[m[1]] && onVerse) {
+        const v = verses[m[1]]
+        result.push(
+          <span key={`v-${m.index}`} className="verse-ref" onClick={(e) => { e.stopPropagation(); onVerse({ code: v.c, text: v.t }) }}>
+            {v.c}
+          </span>
+        )
+      } else if (verses && verses[m[1]]) {
+        result.push(<span key={`v-${m.index}`} className="verse-ref">{verses[m[1]].c}</span>)
+      }
+      last = m.index + m[0].length
+    }
+    if (last < text.length) {
+      result.push(...highlightParts(text.slice(last)))
+    }
+    return result
+  }
+
+  function highlightParts(text: string): (string | JSX.Element)[] {
+    const parts = text.split(regex)
+    return parts.map((part, i) => {
+      if (part.toLowerCase() === keyword.toLowerCase()) {
+        const idx = matchIdx++
+        return (
+          <mark
+            key={`h-${i}`}
+            className="locator-mark"
+            ref={(el) => { markRefs.current[idx] = el }}
+            data-match={idx}
+          >
+            {part}
+          </mark>
+        )
+      }
+      return part
+    })
+  }
+
   return (
     <>
-      {paragraphs.map((p, pi) => {
-        const parts = p.split(regex)
-        return (
-          <p key={pi} className="locator-p">
-            {parts.map((part, i) => {
-              if (part.toLowerCase() === keyword.toLowerCase()) {
-                const idx = matchIdx++
-                return (
-                  <mark
-                    key={i}
-                    className="locator-mark"
-                    ref={(el) => { markRefs.current[idx] = el }}
-                    data-match={idx}
-                  >
-                    {part}
-                  </mark>
-                )
-              }
-              return part
-            })}
-          </p>
-        )
-      })}
+      {paragraphs.map((p, pi) => (
+        <p key={pi} className="locator-p">{renderFragment(p)}</p>
+      ))}
     </>
   )
 }
@@ -498,5 +553,46 @@ function PickerPanel({ pickerBooks, onClose, onSelectBook }: {
         </div>
       </div>
     </div>
+  )
+}
+
+function VerseText({ text, verses, onVerse }: {
+  text: string
+  verses?: VerseRef
+  onVerse?: (v: { code: string; text: string }) => void
+}) {
+  if (!verses) return <p className="locator-p">{text}</p>
+  VERSE_MARKER.lastIndex = 0
+  const parts: (string | { code: string; text: string })[] = []
+  let last = 0
+  let match
+  while ((match = VERSE_MARKER.exec(text)) !== null) {
+    if (match.index > last) parts.push(text.slice(last, match.index))
+    const v = verses[match[1]]
+    if (v) parts.push({ code: v.c, text: v.t })
+    else parts.push(text.slice(match.index, match.index + match[0].length).replace(/\[\[r:\d+\]\]/, ''))
+    last = match.index + match[0].length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+
+  return (
+    <p className="locator-p">
+      {parts.map((part, i) =>
+        typeof part === 'string' ? (
+          part
+        ) : (
+          <span
+            key={i}
+            className="verse-ref"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (onVerse) onVerse(part)
+            }}
+          >
+            {part.code}
+          </span>
+        )
+      )}
+    </p>
   )
 }

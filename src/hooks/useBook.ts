@@ -23,10 +23,15 @@ export interface IndexData {
   categories: CategoryMeta[]
 }
 
+export interface VerseRef {
+  [key: string]: { c: string; t: string }
+}
+
 export interface ChapterData {
   index: number
   title: string
   paragraphs: string[]
+  verses?: VerseRef
 }
 
 export interface BookData {

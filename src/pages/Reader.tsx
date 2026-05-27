@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { fetchBook, fetchIndex, findBookMeta, BookData, ChapterData } from '../hooks/useBook'
+import { fetchBook, fetchIndex, findBookMeta, BookData, ChapterData, VerseRef } from '../hooks/useBook'
 import { useSettings, getFontSizePx, Theme, FontSize } from '../store/settings'
-import { IconArrowLeft, IconArrowRight, IconList } from '../components/Icons'
+import { IconArrowLeft, IconArrowRight, IconList, IconX } from '../components/Icons'
 import { useReading } from '../store/reading'
 
 export default function Reader() {
@@ -35,6 +35,7 @@ export default function Reader() {
   const [chapter, setChapter] = useState<ChapterData | null>(null)
   const [showControls, setShowControls] = useState(false)
   const [scrollPct, setScrollPct] = useState(0)
+  const [verseModal, setVerseModal] = useState<{ code: string; text: string } | null>(null)
 
   const contentRef = useRef<HTMLDivElement>(null)
   const [showScrollbar, setShowScrollbar] = useState(false)
@@ -253,7 +254,7 @@ export default function Reader() {
         <div className="reader-text" style={{ fontSize: getFontSizePx(fontSize) }}>
           <h2>{chapter.title}</h2>
           {paragraphs.map((p, i) => (
-            <p key={i}>{p}</p>
+            <VerseText key={i} text={p} verses={chapter.verses} onVerse={setVerseModal} />
           ))}
         </div>
 
@@ -273,6 +274,74 @@ export default function Reader() {
             <span />
           )}
         </div>
+      </div>
+
+      {verseModal && (
+        <VerseModal
+          code={verseModal.code}
+          text={verseModal.text}
+          onClose={() => setVerseModal(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+const VERSE_RE = /\[\[r:(\d+)\]\]/g
+
+function VerseText({ text, verses, onVerse }: {
+  text: string
+  verses?: VerseRef
+  onVerse?: (v: { code: string; text: string }) => void
+}) {
+  if (!verses || !VERSE_RE.test(text)) {
+    VERSE_RE.lastIndex = 0
+    return <p>{text}</p>
+  }
+  VERSE_RE.lastIndex = 0
+  const parts: (string | { code: string; text: string })[] = []
+  let last = 0
+  let match
+  while ((match = VERSE_RE.exec(text)) !== null) {
+    if (match.index > last) parts.push(text.slice(last, match.index))
+    const v = verses[match[1]]
+    if (v) parts.push({ code: v.c, text: v.t })
+    else parts.push(match[0].replace(/\[\[r:\d+\]\]/, ''))
+    last = match.index + match[0].length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+
+  return (
+    <p>
+      {parts.map((part, i) =>
+        typeof part === 'string' ? (
+          part
+        ) : (
+          <span
+            key={i}
+            className="verse-ref"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (onVerse) onVerse(part)
+            }}
+          >
+            {part.code}
+          </span>
+        )
+      )}
+    </p>
+  )
+}
+
+function VerseModal({ code, text, onClose }: { code: string; text: string; onClose: () => void }) {
+  return (
+    <div className="verse-overlay" onClick={onClose}>
+      <div className="verse-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="verse-header">
+          <span className="verse-code">{code}</span>
+          <button className="verse-close" onClick={onClose}><IconX size={16} /></button>
+        </div>
+        <div className="verse-body">{text}</div>
       </div>
     </div>
   )
