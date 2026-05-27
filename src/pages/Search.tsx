@@ -179,9 +179,16 @@ export default function Search() {
 
   const openPicker = () => {
     if (!index) return
+    const resultsByBook = new Set<string>()
+    if (q && allResults.length > 0) {
+      for (const r of allResults) {
+        resultsByBook.add(`${r.cid}-${r.b}`)
+      }
+    }
     const books: PickerBook[] = []
     for (const cat of index.categories) {
       cat.books.forEach((b) => {
+        if (q && allResults.length > 0 && !resultsByBook.has(`${cat.id}-${b.id}`)) return
         books.push({ categoryId: cat.id, categoryName: cat.name, bookId: b.id, title: b.title, chapterCount: b.chapterCount })
       })
     }
