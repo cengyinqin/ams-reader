@@ -3,15 +3,17 @@
 ## 项目结构
 
 ```
-ams-reader/
-├── generate_data.py          # 数据转换脚本（外部）
-├── public/data/              # 静态数据文件
-│   ├── index.json            # 7 分类目录
-│   ├── search-index.json     # 6,355 条目搜索索引
-│   └── books/                # 564 本单书 JSON
-├── src/                      # 源码
-├── android/                  # Capacitor Android
-└── .github/workflows/        # CI: push main → APK
+neebooks/                     # 项目根目录
+├── merge_and_generate.py     # 数据合并脚本（运行于根目录）
+├── logos_data/books/         # 数据源（670 本）
+└── ams-reader/               # React App
+    ├── public/data/          # 静态数据文件
+    │   ├── index.json        # 7 分类目录
+    │   ├── search-index.json # 11,734 条目搜索索引
+    │   └── books/            # 670 本单书 JSON
+    ├── src/                  # 源码
+    ├── android/              # Capacitor Android
+    └── .github/workflows/    # CI: push main → APK
 ```
 
 ## App 架构
@@ -89,9 +91,13 @@ cd android && ./gradlew assembleDebug
 
 ## 数据文件
 
+数据由根目录 `merge_and_generate.py` 从 `logos_data/` 生成，来源：`logos-rhema.com`（主）+ `ailingmusheng.ren`（辅）。
+
 - `public/data/index.json` — 7 分类目录（启动加载，内存缓存）
 - `public/data/search-index.json` — 搜索索引（首次搜索懒加载）
-- `public/data/books/*.json` — 564 本（按需加载，Map 缓存）
+- `public/data/books/*.json` — 670 本（按需加载，Map 缓存）
+
+章节标题定期通过根目录 `fix_all_titles.py` 批量修复，从网站提取描述性标题替代泛型模式。
 
 ## Git
 
